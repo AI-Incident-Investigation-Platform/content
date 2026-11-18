@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: content-pdf
+spec:
+  replicas: 0
+  selector:
+    matchLabels: {app: content-pdf}
+  strategy:
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+  template:
+    metadata:
+      labels: {app: content-pdf}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: content-pdf
+          image: aiip-content:latest
+          envFrom:
+            - secretRef: {name: content}
+          env:
+            - {name: CONTENT_ROLE, value: pdf}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 1000m, memory: 768Mi}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: content-pdf-rabbitmq
+spec:
+  secretTargetRef:
+    - parameter: host
+      name: content
+      key: RABBITMQ_URL
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: content-pdf
+spec:
+  scaleTargetRef: {name: content-pdf}
+  minReplicaCount: 0
+  maxReplicaCount: 1
+  pollingInterval: 5
+  cooldownPeriod: 120
+  triggers:
+    - type: rabbitmq
+      metadata: {queueName: content.pdf-render, mode: QueueLength, value: "1"}
+      authenticationRef: {name: content-pdf-rabbitmq}
